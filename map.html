@@ -57,31 +57,31 @@
 				//1*1
 				[0,0],
 				//3*3
-				[0,-1],
-				[1,0],
 				[0,1],
+				[1,0],
+				[0,-1],
 				[-1,0],
-				[-1,-1],
-				[1,-1],
-				[1,1],
 				[-1,1],
+				[1,1],
+				[1,-1],
+				[-1,-1],
 				//5*5
-				[-2,-2],
-				[-1,-2],
-				[0,-2],
-				[1,-2],
-				[2,-2],
-				[2,-1],
-				[2,0],
-				[2,1],
-				[2,2],
-				[1,2],
-				[0,2],
-				[-1,2],
 				[-2,2],
-				[-2,1],
+				[-1,2],
+				[0,2],
+				[1,2],
+				[2,2],
+				[2,1],
+				[2,0],
+				[2,-1],
+				[2,-2],
+				[1,-2],
+				[0,-2],
+				[-1,-2],
+				[-2,-2],
+				[-2,-1],
 				[-2,0],
-				[-2,1]
+				[-2,1],
 			];
 			var fetchSize = 0.01;
 			
@@ -404,7 +404,7 @@
 								outerpoints.push(new THREE.Vector2(way.nodes[j].x,way.nodes[j].y));
 							}
 						}
-						if(outerpoints.length == 0)
+						if(outerpoints.length < 3)
 							continue;
 						var holes = [];
 						for(var i=0;i<innerways.length;i++){
@@ -447,7 +447,7 @@
 								outerpoints.push(new THREE.Vector2(way.nodes[j].x,way.nodes[j].y));
 							}
 						}
-						if(outerpoints.length == 0)
+						if(outerpoints.length < 3)
 							continue;
 						var holes = [];
 						for(var i=0;i<innerways.length;i++){
