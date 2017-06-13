@@ -66,7 +66,7 @@
 				[1,-1],
 				[-1,-1],
 				//5*5
-				[-2,2],
+				/*[-2,2],
 				[-1,2],
 				[0,2],
 				[1,2],
@@ -81,7 +81,7 @@
 				[-2,-2],
 				[-2,-1],
 				[-2,0],
-				[-2,1],
+				[-2,1],*/
 			];
 			var fetchSize = 0.01;
 			
@@ -267,8 +267,11 @@
 						}
 						var shape = new THREE.Shape(points);
 						
-						if(way.height)
+						if(way.height){
 							baseBuildingOptions.amount = way.height;
+						}else if(way["building:levels"]){
+							baseBuildingOptions.amount = way["building:levels"]*3;
+						}
 						
 						var geometry = new THREE.ExtrudeGeometry( shape , baseBuildingOptions);
 						
