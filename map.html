@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>map</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			#map2D {
+				margin-left: auto;
+				margin-right: auto;
+				height: 25%;
+				width: 50%;
+			  }
+			 
+			#map3D {
+				height: 75%;
+				width: 100%;
+			}
+			
+			html, body {
+			height: 100%;
+			margin: 0;
+			padding: 0;
+		  }
+			
+			
+
+
+		</style>
+	</head>
+	<body>
+		<div id="map2D"></div>
+		<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAmbuaq4mFgxcUJBc7TXKNXJKfDchYss-w&callback=initMap" async defer></script>
+		
+		<div id="map3D"></div>
+		<script src="three.js"></script>
+		<script src="colors.js"></script>
+
+		<script>
+			
+			var OSMData;
+			var mapData = {};
+			var loadStatus=0;
+			
+			var map2D;
+			  function initMap() {
+				map2D = new google.maps.Map(document.getElementById('map2D'), {
+				  center: {lat: 48.7835119, lng: 2.21168518},
+				  zoom: 8
+				});
+				google.maps.event.addListener(map2D, 'click', function(event) {
+				   getOSMData({minlat:event.latLng.lat()-0.005, minlon:event.latLng.lng()-0.005, maxlat:event.latLng.lat()+0.005, maxlon:event.latLng.lng()+0.005});
+				});
+			  }
+			
+			function getOSMData(bb){
+				if(loadStatus !=0)
+					return -1;
+				loadStatus = 1;
+				var url="http://api.openstreetmap.org/api/0.6/map?bbox="+bb.minlon+","+bb.minlat+","+bb.maxlon+","+bb.maxlat;
+				fetch(url).then(function(response) {
+					 if(response.ok) {
+						response.text().then(function(text){
+							OSMData = text;
+							mapData = {};
+							mapData.nodes = {};
+							mapData.bounds = {};
+							mapData.ways = {};
+							mapData.relations = {};
+							extractData(OSMData,mapData);
+							if(root){
+								scene.remove(root);
+								root = null;
+							}
+							root = new THREE.Object3D();
+							buildData(mapData, root);
+							scene.add(root);
+							loadStatus=0;
+						});
+					  }
+					});
+			}
+			
+			function createRoadPoints(points,size){
+				var output = [];
+				for(var i =1;i<points.length;i++){
+					var diff= new THREE.Vector3().subVectors(points[i],points[i-1]);
+					diff.cross(new THREE.Vector3(0,0,1)).normalize().multiplyScalar(size);
+					output[(i-1)*2]=new THREE.Vector3().addVectors(diff,points[i-1]);
+					output[(i-1)*2+1]=new THREE.Vector3().addVectors(diff,points[i]);
+					output[((points.length-1)*2)+(points.length-1-i)*2]=new THREE.Vector3().subVectors(points[i],diff);
+					output[((points.length-1)*2)+(points.length-1-i)*2+1]=new THREE.Vector3().subVectors(points[i-1],diff);
+				}
+				return output;
+			}
+			
+			function distance(lat1, lon1, lat2, lon2){  // generally used geo measurement function
+				var R = 6378.137; // Radius of earth in KM
+				var dLat = lat2 * Math.PI / 180 - lat1 * Math.PI / 180;
+				var dLon = lon2 * Math.PI / 180 - lon1 * Math.PI / 180;
+				var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+						Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+						Math.sin(dLon/2) * Math.sin(dLon/2);
+				var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+				var d = R * c;
+				return d * 1000; // meters
+			}
+			
+			function build3DPos(data) {
+				var bounds = data.bounds;
+				var minLongDiff = distance(bounds.minLat,bounds.minLon,bounds.minLat,bounds.maxLon);
+				var maxLongDiff = distance(bounds.maxLat,bounds.minLon,bounds.maxLat,bounds.maxLon);
+				var minLatDiff = distance(bounds.minLat,bounds.minLon,bounds.maxLat,bounds.minLon);
+				var maxLatDiff = distance(bounds.minLat,bounds.maxLon,bounds.maxLat,bounds.maxLon);
+				
+				var upLeftCorner = {lat : bounds.minLat, lon : bounds.minLon};
+				upLeftCorner.x = - minLongDiff/2;
+				upLeftCorner.y =  minLatDiff/2;
+				var upRightCorner = {lat : bounds.minLat, lon : bounds.maxLon};
+				upRightCorner.x =  minLongDiff/2;
+				upRightCorner.y =  maxLatDiff/2;
+				var downLeftCorner = {lat : bounds.maxLat, lon : bounds.minLon};
+				downLeftCorner.x = - maxLongDiff/2;
+				downLeftCorner.y = - minLatDiff/2;
+				var downRightCorner = {lat : bounds.maxLat, lon : bounds.maxLon};
+				downRightCorner.x =  maxLongDiff/2;
+				downRightCorner.y = - maxLatDiff/2;
+				
+				var center = {lat : (bounds.maxLat + bounds.minLat)/2, lon : (bounds.maxLon+ bounds.minLon)/2};
+				center.x = 0;
+				center.y = 0;
+				
+				bounds.upLeft = upLeftCorner;
+				bounds.upRight = upRightCorner;
+				bounds.downLeft = downLeftCorner;
+				bounds.downRight = downRightCorner;
+				bounds.center = center;
+				
+				bounds.latRatio = (minLatDiff + maxLatDiff)/(2*(bounds.maxLat - bounds.minLat));//meters per degree
+				bounds.lonRatio = (minLongDiff + maxLongDiff)/(2*(bounds.maxLon - bounds.minLon));//meters per degree (approxiamtion here, if minlongdiff and maxlongdiff are sufficently different, the ratio should change depending on latitude
+				
+				for (var nodeId in data.nodes){
+					var node = data.nodes[nodeId];
+					var locLatDiff = node.lat - bounds.center.lat;
+					var locLonDiff = node.lon - bounds.center.lon;
+					node.y = locLatDiff *bounds.latRatio;
+					node.x = locLonDiff *bounds.lonRatio;
+				}
+				
+			}
+			
+			function buildData(data,rootNode) {
+				build3DPos(data);
+				var baseBuildingOptions ={steps: 2,
+					amount: 10,
+					bevelEnabled: false
+				};
+				
+				/*var boundsPoints = [];
+				boundsPoints.push(new THREE.Vector2(data.bounds.upLeft.x,data.bounds.upLeft.y));
+				boundsPoints.push(new THREE.Vector2(data.bounds.upRight.x,data.bounds.upRight.y));
+				boundsPoints.push(new THREE.Vector2(data.bounds.downRight.x,data.bounds.downRight.y));
+				boundsPoints.push(new THREE.Vector2(data.bounds.downLeft.x,data.bounds.downLeft.y));
+				
+				var boundshape = new THREE.Shape(boundsPoints);
+				var boundgeom = new THREE.ShapeBufferGeometry(boundshape);
+				var boundmaterial = new THREE.MeshLambertMaterial( { color: 0xaaaaaa, emissive: 0x888888 } );
+				var boundmesh = new THREE.Mesh( boundgeom, boundmaterial ) ;
+				rootNode.add( boundmesh );*/
+				
+				
+				var buildingGeometry = new THREE.Geometry();
+				var roadGeometry = new THREE.Geometry();
+				var riverGeometry = new THREE.Geometry();
+				var forestGeometry = new THREE.Geometry();
+				var grassGeometry = new THREE.Geometry();
+				var fieldGeometry = new THREE.Geometry();
+				for (var wayId in data.ways){
+					var way = data.ways[wayId];
+					//building
+					
+					if (way.building){
+						var points = [];
+						for ( var i=0;i<way.nodes.length;i++){
+							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+						}
+						var shape = new THREE.Shape(points);
+						
+						if(way.height)
+							baseBuildingOptions.amount = way.height;
+						
+						var geometry = new THREE.ExtrudeGeometry( shape , baseBuildingOptions);
+						
+						baseBuildingOptions.amount = 10;
+						
+						buildingGeometry.merge(geometry);
+					}
+					
+					
+					//road
+					
+					if(way.highway){
+						var points = [];
+						for ( var i=0;i<way.nodes.length;i++){
+							points.push(new THREE.Vector3(way.nodes[i].x,way.nodes[i].y,0.0));
+						}
+						var size = 2;
+						if(way.highway == "motorway" || way.highway == "motorway_link" || way.highway == "trunk" || way.highway == "trunk_link" || way.highway == "primary" || way.highway == "primary_link")
+							size = 5;
+						if(way.highway == "secondary" || way.highway == "secondary_link" || way.highway == "tertiary" || way.highway == "tertiary_link")
+							size = 3;
+						if(way.highway == "track" || way.highway == "footway" || way.highway == "bridleway" || way.highway == "steps" || way.highway == "path"  || way.highway == "cycleway")
+							size = 1;
+						var shapePoints = createRoadPoints(points,size);
+						var shape = new THREE.Shape(shapePoints);
+						var geometry = new THREE.ShapeGeometry( shape );
+						
+						roadGeometry.merge(geometry);
+						
+					}
+					
+					//river
+					
+					if(way.waterway && way.waterway != "riverbank"){
+						var points = [];
+						for ( var i=0;i<way.nodes.length;i++){
+							points.push(new THREE.Vector3(way.nodes[i].x,way.nodes[i].y,0.0));
+						}
+						var size = 3;
+						if(way.width){
+							size = way.width/2;
+						}
+						else if(way.waterway == "stream" )
+							size = 1;
+						var shapePoints = createRoadPoints(points,size);
+						var shape = new THREE.Shape(shapePoints);
+						var geometry = new THREE.ShapeGeometry( shape );
+						
+						riverGeometry.merge(geometry);
+						
+					}
+					
+					//water
+					
+					if((way.waterway && way.waterway == "riverbank")||( way.natural && way.natural=="water" ) || (way.landuse && way.landuse=="basin")){
+						var points = [];
+						for ( var i=0;i<way.nodes.length;i++){
+							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+						}
+						var shape = new THREE.Shape(points);
+						
+						var geometry = new THREE.ShapeGeometry( shape );
+						
+						riverGeometry.merge(geometry);
+						
+					}
+					
+					//forest
+					if(way.landuse && (way.landuse=="plant_nursery" || way.landuse=="forest")){
+						var points = [];
+						for ( var i=0;i<way.nodes.length;i++){
+							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+						}
+						var shape = new THREE.Shape(points);
+						
+						var geometry = new THREE.ShapeGeometry( shape );
+						
+						forestGeometry.merge(geometry);
+						
+					}
+					
+					//grass
+					if(way.landuse && (way.landuse=="grass" || way.landuse=="greenfield" || way.landuse=="meadow"  || way.landuse=="recreation_ground"  || way.landuse=="village_green")){
+						var points = [];
+						for ( var i=0;i<way.nodes.length;i++){
+							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+						}
+						var shape = new THREE.Shape(points);
+						
+						var geometry = new THREE.ShapeGeometry( shape );
+						
+						grassGeometry.merge(geometry);
+						
+					}
+					
+					//field
+					if(way.landuse && (way.landuse=="vineyard" || way.landuse=="orchad" || way.landuse=="greenhouse_horticulture"  || way.landuse=="farmland"  || way.landuse=="allotments")){
+						var points = [];
+						for ( var i=0;i<way.nodes.length;i++){
+							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+						}
+						var shape = new THREE.Shape(points);
+						
+						var geometry = new THREE.ShapeGeometry( shape );
+						
+						fieldGeometry.merge(geometry);
+						
+					}
+					
+					
+				}
+				
+				for (var relationId in data.relations) {
+					var relation = data.relations[relationId];
+					
+					//building
+					if(relation.building){//suppose multipolygon
+						var outerways = [];
+						var innerways = [];
+						for(var i=0;i<relation.ways.length;i++){
+							var way = relation.ways[i];
+							if (way.role == "outer"){
+								outerways.push(way);
+							}else if(way.role == "inner"){
+								innerways.push(way);
+							}
+						}
+						//suppose every outter form one ring and every inner is a different hole (because fuckit)
+						var outerpoints = [];
+						for(var i=0;i<outerways.length;i++){
+							var way = outerways[i];
+							for ( var j=0;j<way.nodes.length;j++){
+								outerpoints.push(new THREE.Vector2(way.nodes[j].x,way.nodes[j].y));
+							}
+						}
+						if(outerpoints.length == 0)
+							continue;
+						var holes = [];
+						for(var i=0;i<innerways.length;i++){
+							var way = innerways[i];
+							var hole = [];
+							for ( var j=0;j<way.nodes.length;j++){
+								hole.push(new THREE.Vector2(way.nodes[j].x,way.nodes[j].y));
+							}
+							holes.push(new THREE.Path(hole));
+						}
+						
+						var shape = new THREE.Shape(outerpoints);
+						shape.holes = holes;
+						
+						if(relation.height)
+							baseBuildingOptions.amount = relation.height;
+						
+						var geometry = new THREE.ExtrudeGeometry( shape , baseBuildingOptions);
+						
+						baseBuildingOptions.amount = 10;
+						
+						buildingGeometry.merge(geometry);
+						
+					}else if(relation.type =="multipolygon"){
+						var outerways = [];
+						var innerways = [];
+						for(var i=0;i<relation.ways.length;i++){
+							var way = relation.ways[i];
+							if (way.role == "outer"){
+								outerways.push(way);
+							}else if(way.role == "inner"){
+								innerways.push(way);
+							}
+						}
+						//suppose every outter form one ring and every inner is a different hole (because fuckit)
+						var outerpoints = [];
+						for(var i=0;i<outerways.length;i++){
+							var way = outerways[i];
+							for ( var j=0;j<way.nodes.length;j++){
+								outerpoints.push(new THREE.Vector2(way.nodes[j].x,way.nodes[j].y));
+							}
+						}
+						if(outerpoints.length == 0)
+							continue;
+						var holes = [];
+						for(var i=0;i<innerways.length;i++){
+							var way = innerways[i];
+							var hole = [];
+							for ( var j=0;j<way.nodes.length;j++){
+								hole.push(new THREE.Vector2(way.nodes[j].x,way.nodes[j].y));
+							}
+							holes.push(new THREE.Path(hole));
+						}
+						
+						var shape = new THREE.Shape(outerpoints);
+						shape.holes = holes;
+						
+						var geometry = new THREE.ShapeGeometry( shape );
+						
+						if(relation.landuse && (relation.landuse=="plant_nursery" || relation.landuse=="forest"))
+							forestGeometry.merge(geometry);
+							
+						if(relation.landuse && (relation.landuse=="grass" || relation.landuse=="greenfield" || relation.landuse=="meadow"  || relation.landuse=="recreation_ground"  || relation.landuse=="village_green"))
+							grassGeometry.merge(geometry);
+							
+						if(way.landuse && (way.landuse=="vineyard" || way.landuse=="orchad" || way.landuse=="greenhouse_horticulture"  || way.landuse=="farmland"  || way.landuse=="allotments"))
+							fieldGeometry.merge(geometry);
+					}
+				}
+				
+				
+				var buildingMaterial = new THREE.MeshLambertMaterial( { color: colors.building.diffuse, emissive: colors.building.ambient } );
+				var buildingMesh = new THREE.Mesh( buildingGeometry, buildingMaterial ) ;
+				rootNode.add( buildingMesh );
+				
+				var roadMaterial = new THREE.MeshLambertMaterial( { color: colors.road.diffuse, emissive: colors.road.ambient, side : THREE.DoubleSide } );
+				var roadMesh = new THREE.Mesh( roadGeometry, roadMaterial );
+				roadMesh.position.z = 0.2;
+				rootNode.add(roadMesh);
+				
+				var riverMaterial = new THREE.MeshLambertMaterial( { color: colors.water.diffuse, emissive: colors.water.ambient, side : THREE.DoubleSide } );
+				var riverMesh = new THREE.Mesh( riverGeometry, riverMaterial );
+				riverMesh.position.z = -0.2;
+				rootNode.add(riverMesh);
+				
+				var forestMaterial = new THREE.MeshLambertMaterial( { color: colors.forest.diffuse, emissive: colors.forest.ambient, side : THREE.DoubleSide } );
+				var forestMesh = new THREE.Mesh( forestGeometry, forestMaterial );
+				forestMesh.position.z = -0.2;
+				rootNode.add(forestMesh);
+				
+				var grassMaterial = new THREE.MeshLambertMaterial( { color: colors.grass.diffuse, emissive: colors.grass.ambient, side : THREE.DoubleSide } );
+				var grassMesh = new THREE.Mesh( grassGeometry, grassMaterial );
+				grassMesh.position.z = -0.2;
+				rootNode.add(grassMesh);
+				
+				var fieldMaterial = new THREE.MeshLambertMaterial( { color: colors.field.diffuse, emissive: colors.field.ambient, side : THREE.DoubleSide } );
+				var fieldMesh = new THREE.Mesh( fieldGeometry, fieldMaterial );
+				fieldMesh.position.z = -0.2;
+				rootNode.add(fieldMesh);
+			}
+			
+			function extractData(mapText,data) {
+				/*function readOSMFile(file)
+				{
+					var rawFile = new XMLHttpRequest();
+					rawFile.open("GET", file, false);
+					rawFile.onreadystatechange = function ()
+					{
+						if(rawFile.readyState === 4)
+						{
+							if(rawFile.status === 200 || rawFile.status == 0)
+							{
+								mapText = rawFile.responseText;
+							}
+						}
+					}
+					rawFile.send(null);
+				}
+				
+				readOSMFile("map.osm");*/
+				if (window.DOMParser)
+				{
+					parser = new DOMParser();
+					var mapXml = parser.parseFromString(mapText, "text/xml");
+				}
+				
+				var boundsXML = mapXml.getElementsByTagName("bounds");
+				data.bounds.minLat = parseFloat(boundsXML[0].attributes.minlat.value);
+				data.bounds.minLon = parseFloat(boundsXML[0].attributes.minlon.value);
+				data.bounds.maxLat = parseFloat(boundsXML[0].attributes.maxlat.value);
+				data.bounds.maxLon = parseFloat(boundsXML[0].attributes.maxlon.value);
+				
+				var nodesXML = mapXml.getElementsByTagName("node");
+				for (var i=0;i<nodesXML.length;i++){
+					var node = {};
+					node.lat = parseFloat(nodesXML[i].attributes.lat.value);
+					node.lon = parseFloat(nodesXML[i].attributes.lon.value);
+					data.nodes[nodesXML[i].attributes.id.value]=node;
+				}
+				
+				var waysXML = mapXml.getElementsByTagName("way");
+				for (var i=0;i<waysXML.length;i++){
+					var way = {};
+					way.nodes = [];
+					var nds = waysXML[i].getElementsByTagName("nd");
+					for (var j=0;j<nds.length;j++){
+						way.nodes.push(data.nodes[nds[j].attributes.ref.value]);
+					}
+					var tags = waysXML[i].getElementsByTagName("tag");
+					for (var j=0;j<tags.length;j++){
+						way[tags[j].attributes.k.value]=tags[j].attributes.v.value;
+					}
+					data.ways[waysXML[i].attributes.id.value]=way;
+				}
+				
+				var relationsXML = mapXml.getElementsByTagName("relation");
+				for (var i=0;i<relationsXML.length;i++){
+					var relation = {};
+					relation.ways = [];
+					var members = relationsXML[i].getElementsByTagName("member");
+					for (var j=0;j<members.length;j++){
+						var member = members[j];
+						if(member.attributes.type.value == "way"){
+							var currentway = data.ways[member.attributes.ref.value];
+							if(currentway){
+								relation.ways.push(data.ways[member.attributes.ref.value]);
+								relation.ways[relation.ways.length-1].role = member.attributes.role.value;
+							}
+						}
+					}
+					var tags = relationsXML[i].getElementsByTagName("tag");
+					for (var j=0;j<tags.length;j++){
+						relation[tags[j].attributes.k.value]=tags[j].attributes.v.value;
+					}
+					data.relations[relationsXML[i].attributes.id.value]=relation;
+				}
+			}
+			
+			var mouseX = 0, mouseY = 0, forward = 0,
+
+			windowHalfX = window.innerWidth / 2,
+			windowHalfY = window.innerHeight / 2,
+
+			camera, scene, renderer, bag;
+			var root;
+
+			init();
+			animate();
+
+			function init() {
+			
+				
+			
+				var div = document.getElementById('map3D');
+
+				var i;
+
+				camera = new THREE.PerspectiveCamera( 33, div.clientWidth / div.clientHeight, 1, 100000 );
+				//camera = new THREE.OrthographicCamera( window.innerWidth / - 2, window.innerWidth / 2, window.innerHeight / 2, window.innerHeight / - 2, -500, 100000 );
+				camera.position.z = 1500;
+				camera.position.y = -1500;
+				camera.updateProjectionMatrix();
+				
+
+				scene = new THREE.Scene();
+				scene.add(camera);
+				var directionalLight = new THREE.DirectionalLight( 0xffffff, 0.5 );
+				directionalLight.position.set( 100, 0, 100 ).normalize();
+				setTimeout( function () {
+					scene.add( directionalLight );
+				}, 500 );
+				
+				var ambiantlight = new THREE.AmbientLight( 0x404040 ); // soft white light
+				scene.add( ambiantlight );
+
+				renderer = new THREE.WebGLRenderer({ antialias: true });
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( div.clientWidth, div.clientHeight );
+				renderer.setClearColor( colors.background, 1 );
+				
+				camera.lookAt( scene.position );
+
+				div.appendChild( renderer.domElement );
+				
+
+				div.addEventListener( 'mousemove', onDocumentMouseMove, false );
+				div.addEventListener( 'mouseleave', onDocumentMouseLeave, false );
+				div.addEventListener( 'mousedown', onDocumentMouseDown, false );
+				div.addEventListener( 'mouseup', onDocumentMouseUp, false );
+
+				//
+
+				var width = div.clientWidth || 2;
+				var height = div.clientHeight || 2;
+
+				//
+
+				window.addEventListener( 'resize', onWindowResize, false );
+
+			}
+
+			function onWindowResize() {
+			
+				width = div.clientWidth || 2;
+				height = div.clientHeight || 2;
+
+				windowHalfX = width / 2;
+				windowHalfY = height / 2;
+
+				camera.left = width / - 2;
+				camera.right = width / 2;
+				camera.top = height / 2;
+				camera.bottom = height / - 2;
+
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( width, height );
+
+			}
+
+			//
+
+			function onDocumentMouseMove( event ) {
+
+				mouseX = event.clientX - windowHalfX;
+				mouseY = event.clientY - windowHalfY;
+
+			}
+			function onDocumentMouseLeave( event ) {
+
+				mouseX = 0;
+				mouseY = 0;
+
+			}
+			
+			function onDocumentMouseDown( event ) {
+
+				forward = true;
+
+			}
+			
+			function onDocumentMouseUp( event ) {
+
+				forward = false;
+
+			}
+
+			
+
+			//
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+				render();
+
+			}
+
+			function render() {
+				var camDir = camera.getWorldDirection();
+				var right = new THREE.Vector3().crossVectors(camDir,new THREE.Vector3(0,0,1));
+
+				var lookAtPos= new THREE.Vector3().addVectors(camera.position,camDir.normalize().multiplyScalar(100));
+				
+				if(Math.abs(mouseX) > window.innerWidth / 8){
+				
+					if(mouseX < 0)
+						lookAtPos.sub(right.normalize());
+					else
+						lookAtPos.add(right.normalize());
+				}
+				
+				if(Math.abs(mouseY) > window.innerHeight / 8){
+				
+					if(mouseY > 0)
+						lookAtPos.sub(new THREE.Vector3(0,0,1));
+					else
+						lookAtPos.add(new THREE.Vector3(0,0,1));
+				
+				}
+				
+				if(forward){
+					camera.position.add(camDir.normalize().multiplyScalar(10));
+				}
+				if(camera.position.z < 1){
+					camera.position.z = 1;
+				}
+				
+				camera.lookAt(lookAtPos);
+				camera.up = new THREE.Vector3(0,0,1);
+				
+
+				var time = Date.now() * 0.0005;
+
+				
+				//root.rotation.z = time * ( 1 );
+				
+				renderer.render(scene,camera);
+
+
+			}
+
+		</script>
+	</body>
+</html>
