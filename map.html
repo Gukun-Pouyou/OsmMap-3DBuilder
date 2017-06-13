@@ -13,8 +13,10 @@
 			  }
 			 
 			#map3D {
-				height: 75%;
-				width: 100%;
+				margin-left: auto;
+				margin-right: auto;
+				height: 73%;
+				width: 98%;
 			}
 			
 			html, body {
@@ -38,21 +40,80 @@
 
 		<script>
 			
+			var div;
+			
 			var OSMData;
 			var mapData = {};
 			var loadStatus=0;
 			
+			var newScene = false;
+			var resetCam = false;
+			
 			var map2D;
+			
+			 var centerPos = null;
+			 
+			var fetchTab = [
+				//1*1
+				[0,0],
+				//3*3
+				[0,1],
+				[1,0],
+				[0,-1],
+				[-1,0],
+				[-1,1],
+				[1,1],
+				[1,-1],
+				[-1,-1],
+				//5*5
+				/*[-2,2],
+				[-1,2],
+				[0,2],
+				[1,2],
+				[2,2],
+				[2,1],
+				[2,0],
+				[2,-1],
+				[2,-2],
+				[1,-2],
+				[0,-2],
+				[-1,-2],
+				[-2,-2],
+				[-2,-1],
+				[-2,0],
+				[-2,1],*/
+			];
+			var fetchSize = 0.01;
+			
+			//initialize google map and the click callback
 			  function initMap() {
 				map2D = new google.maps.Map(document.getElementById('map2D'), {
 				  center: {lat: 48.7835119, lng: 2.21168518},
-				  zoom: 8
+				  zoom: 12
 				});
 				google.maps.event.addListener(map2D, 'click', function(event) {
-				   getOSMData({minlat:event.latLng.lat()-0.005, minlon:event.latLng.lng()-0.005, maxlat:event.latLng.lat()+0.005, maxlon:event.latLng.lng()+0.005});
+					newScene = true;
+					var baseBB = {minlat:event.latLng.lat()-0.005, minlon:event.latLng.lng()-0.005, maxlat:event.latLng.lat()+0.005, maxlon:event.latLng.lng()+0.005};
+					for(var i = 0 ; i< fetchTab.length; i++){
+						var bbToUse = {minlat:baseBB.minlat+fetchTab[i][1]*fetchSize, 
+									minlon:baseBB.minlon+fetchTab[i][0]*fetchSize, 
+									maxlat:baseBB.maxlat+fetchTab[i][1]*fetchSize, 
+									maxlon:baseBB.maxlon+fetchTab[i][0]*fetchSize};
+						tryGetOsmData(bbToUse);
+					}
 				});
 			  }
 			
+			//only call when the last call has been processed
+			function tryGetOsmData(bb){
+				if(loadStatus!=0){
+					setTimeout(function(){tryGetOsmData(bb);},1000);
+				}else{
+					getOSMData(bb);
+				}
+			}
+			
+			//actual call to osm api
 			function getOSMData(bb){
 				if(loadStatus !=0)
 					return -1;
@@ -68,13 +129,19 @@
 							mapData.ways = {};
 							mapData.relations = {};
 							extractData(OSMData,mapData);
-							if(root){
-								scene.remove(root);
-								root = null;
+							if(newScene){
+								newScene = false;
+								centerPos = null;
+								resetCam = true;
+								if(root)
+									scene.remove(root);
+								root = new THREE.Object3D();
+								scene.add(root);
 							}
-							root = new THREE.Object3D();
-							buildData(mapData, root);
-							scene.add(root);
+							var node = new THREE.Object3D();
+							root.add(node);
+							buildData(mapData, node);
+							
 							loadStatus=0;
 						});
 					  }
@@ -106,6 +173,8 @@
 				return d * 1000; // meters
 			}
 			
+			
+			//convert latlon into scene positions
 			function build3DPos(data) {
 				var bounds = data.bounds;
 				var minLongDiff = distance(bounds.minLat,bounds.minLon,bounds.minLat,bounds.maxLon);
@@ -126,30 +195,42 @@
 				downRightCorner.x =  maxLongDiff/2;
 				downRightCorner.y = - maxLatDiff/2;
 				
-				var center = {lat : (bounds.maxLat + bounds.minLat)/2, lon : (bounds.maxLon+ bounds.minLon)/2};
-				center.x = 0;
-				center.y = 0;
 				
+				bounds.latRatio = (minLatDiff + maxLatDiff)/(2*(bounds.maxLat - bounds.minLat));//meters per degree
+				bounds.lonRatio = (minLongDiff + maxLongDiff)/(2*(bounds.maxLon - bounds.minLon));//meters per degree (approxiamtion here, if minlongdiff and maxlongdiff are sufficently different, the ratio should change depending on latitude
 				bounds.upLeft = upLeftCorner;
 				bounds.upRight = upRightCorner;
 				bounds.downLeft = downLeftCorner;
 				bounds.downRight = downRightCorner;
-				bounds.center = center;
 				
-				bounds.latRatio = (minLatDiff + maxLatDiff)/(2*(bounds.maxLat - bounds.minLat));//meters per degree
-				bounds.lonRatio = (minLongDiff + maxLongDiff)/(2*(bounds.maxLon - bounds.minLon));//meters per degree (approxiamtion here, if minlongdiff and maxlongdiff are sufficently different, the ratio should change depending on latitude
+				var center = {lat : (bounds.maxLat + bounds.minLat)/2, lon : (bounds.maxLon+ bounds.minLon)/2};
+				if(!centerPos){
+				center.x = 0;
+				center.y = 0;
+				centerPos = center;
+				} else {
+					var locLatDiff = centerPos.lat - center.lat;
+					var locLonDiff = centerPos.lon - center.lon;
+					center.y = locLatDiff *bounds.latRatio;
+					center.x = locLonDiff *bounds.lonRatio;
+				}
+				
+				bounds.center = center;
 				
 				for (var nodeId in data.nodes){
 					var node = data.nodes[nodeId];
 					var locLatDiff = node.lat - bounds.center.lat;
 					var locLonDiff = node.lon - bounds.center.lon;
-					node.y = locLatDiff *bounds.latRatio;
-					node.x = locLonDiff *bounds.lonRatio;
+					node.y = -center.y + locLatDiff *bounds.latRatio;
+					node.x = -center.x + locLonDiff *bounds.lonRatio;
 				}
 				
 			}
 			
+			//create geometry
+			var countBuildData = 1;
 			function buildData(data,rootNode) {
+				console.log("buildData"+countBuildData++);
 				build3DPos(data);
 				var baseBuildingOptions ={steps: 2,
 					amount: 10,
@@ -186,8 +267,11 @@
 						}
 						var shape = new THREE.Shape(points);
 						
-						if(way.height)
+						if(way.height){
 							baseBuildingOptions.amount = way.height;
+						}else if(way["building:levels"]){
+							baseBuildingOptions.amount = way["building:levels"]*3;
+						}
 						
 						var geometry = new THREE.ExtrudeGeometry( shape , baseBuildingOptions);
 						
@@ -323,7 +407,7 @@
 								outerpoints.push(new THREE.Vector2(way.nodes[j].x,way.nodes[j].y));
 							}
 						}
-						if(outerpoints.length == 0)
+						if(outerpoints.length < 3)
 							continue;
 						var holes = [];
 						for(var i=0;i<innerways.length;i++){
@@ -366,7 +450,7 @@
 								outerpoints.push(new THREE.Vector2(way.nodes[j].x,way.nodes[j].y));
 							}
 						}
-						if(outerpoints.length == 0)
+						if(outerpoints.length < 3)
 							continue;
 						var holes = [];
 						for(var i=0;i<innerways.length;i++){
@@ -401,17 +485,17 @@
 				
 				var roadMaterial = new THREE.MeshLambertMaterial( { color: colors.road.diffuse, emissive: colors.road.ambient, side : THREE.DoubleSide } );
 				var roadMesh = new THREE.Mesh( roadGeometry, roadMaterial );
-				roadMesh.position.z = 0.2;
+				roadMesh.position.z = 0.4;
 				rootNode.add(roadMesh);
 				
 				var riverMaterial = new THREE.MeshLambertMaterial( { color: colors.water.diffuse, emissive: colors.water.ambient, side : THREE.DoubleSide } );
 				var riverMesh = new THREE.Mesh( riverGeometry, riverMaterial );
-				riverMesh.position.z = -0.2;
+				riverMesh.position.z = 0.0;
 				rootNode.add(riverMesh);
 				
 				var forestMaterial = new THREE.MeshLambertMaterial( { color: colors.forest.diffuse, emissive: colors.forest.ambient, side : THREE.DoubleSide } );
 				var forestMesh = new THREE.Mesh( forestGeometry, forestMaterial );
-				forestMesh.position.z = -0.2;
+				forestMesh.position.z = -0.4;
 				rootNode.add(forestMesh);
 				
 				var grassMaterial = new THREE.MeshLambertMaterial( { color: colors.grass.diffuse, emissive: colors.grass.ambient, side : THREE.DoubleSide } );
@@ -425,25 +509,8 @@
 				rootNode.add(fieldMesh);
 			}
 			
+			//parse received xml into a usable json
 			function extractData(mapText,data) {
-				/*function readOSMFile(file)
-				{
-					var rawFile = new XMLHttpRequest();
-					rawFile.open("GET", file, false);
-					rawFile.onreadystatechange = function ()
-					{
-						if(rawFile.readyState === 4)
-						{
-							if(rawFile.status === 200 || rawFile.status == 0)
-							{
-								mapText = rawFile.responseText;
-							}
-						}
-					}
-					rawFile.send(null);
-				}
-				
-				readOSMFile("map.osm");*/
 				if (window.DOMParser)
 				{
 					parser = new DOMParser();
@@ -502,7 +569,7 @@
 				}
 			}
 			
-			var mouseX = 0, mouseY = 0, forward = 0,
+			var mouseX = 0, mouseY = 0, forward = 0, backward = 0,
 
 			windowHalfX = window.innerWidth / 2,
 			windowHalfY = window.innerHeight / 2,
@@ -517,7 +584,7 @@
 			
 				
 			
-				var div = document.getElementById('map3D');
+				div  = document.getElementById('map3D');
 
 				var i;
 
@@ -558,6 +625,9 @@
 
 				var width = div.clientWidth || 2;
 				var height = div.clientHeight || 2;
+				
+				windowHalfX = width / 2;
+				windowHalfY = height / 2;
 
 				//
 
@@ -584,12 +654,12 @@
 
 			}
 
-			//
+			//interaction TODO Update
 
 			function onDocumentMouseMove( event ) {
 
-				mouseX = event.clientX - windowHalfX;
-				mouseY = event.clientY - windowHalfY;
+				mouseX = event.offsetX - windowHalfX;
+				mouseY = event.offsetY - windowHalfY;
 
 			}
 			function onDocumentMouseLeave( event ) {
@@ -601,13 +671,17 @@
 			
 			function onDocumentMouseDown( event ) {
 
-				forward = true;
+				if(event.which === 1)
+					forward = 1;
+				else if(event.which=== 2)
+					backward = 1;
 
 			}
 			
 			function onDocumentMouseUp( event ) {
 
-				forward = false;
+				forward = 0;
+				backward = 0;
 
 			}
 
@@ -623,33 +697,46 @@
 			}
 
 			function render() {
-				var camDir = camera.getWorldDirection();
-				var right = new THREE.Vector3().crossVectors(camDir,new THREE.Vector3(0,0,1));
+				
+				if(resetCam){
+					resetCam=false;
+					camera.position.z = 1500;
+					camera.position.y = -1500;
+					var lookAtPos = new THREE.Vector3();
+				}else{
+				
+					var camDir = camera.getWorldDirection();
+					var right = new THREE.Vector3().crossVectors(camDir,new THREE.Vector3(0,0,1));
 
-				var lookAtPos= new THREE.Vector3().addVectors(camera.position,camDir.normalize().multiplyScalar(100));
+					var lookAtPos= new THREE.Vector3().addVectors(camera.position,camDir.normalize().multiplyScalar(100));
+					
+					if(Math.abs(mouseX) > window.innerWidth / 8){
+					
+						if(mouseX < 0)
+							lookAtPos.sub(right.normalize());
+						else
+							lookAtPos.add(right.normalize());
+					}
+					
+					if(Math.abs(mouseY) > window.innerHeight / 8){
+					
+						if(mouseY > 0)
+							lookAtPos.sub(new THREE.Vector3(0,0,1));
+						else
+							lookAtPos.add(new THREE.Vector3(0,0,1));
+					
+					}
 				
-				if(Math.abs(mouseX) > window.innerWidth / 8){
 				
-					if(mouseX < 0)
-						lookAtPos.sub(right.normalize());
-					else
-						lookAtPos.add(right.normalize());
-				}
+					if(forward){
+						camera.position.add(camDir.normalize().multiplyScalar(10));
+					}else if(backward){
+						camera.position.sub(camDir.normalize().multiplyScalar(10));
+					}
+					if(camera.position.z < 1){
+						camera.position.z = 1;
+					}
 				
-				if(Math.abs(mouseY) > window.innerHeight / 8){
-				
-					if(mouseY > 0)
-						lookAtPos.sub(new THREE.Vector3(0,0,1));
-					else
-						lookAtPos.add(new THREE.Vector3(0,0,1));
-				
-				}
-				
-				if(forward){
-					camera.position.add(camDir.normalize().multiplyScalar(10));
-				}
-				if(camera.position.z < 1){
-					camera.position.z = 1;
 				}
 				
 				camera.lookAt(lookAtPos);
