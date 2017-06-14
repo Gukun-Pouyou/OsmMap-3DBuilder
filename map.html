@@ -57,7 +57,7 @@
 				//1*1
 				[0,0],
 				//3*3
-				[0,1],
+				/*[0,1],
 				[1,0],
 				[0,-1],
 				[-1,0],
@@ -66,7 +66,7 @@
 				[1,-1],
 				[-1,-1],
 				//5*5
-				/*[-2,2],
+				[-2,2],
 				[-1,2],
 				[0,2],
 				[1,2],
@@ -81,9 +81,9 @@
 				[-2,-2],
 				[-2,-1],
 				[-2,0],
-				[-2,1],*/
+				[-2,1]*/
 			];
-			var fetchSize = 0.01;
+			var fetchSize = [0.01,0.006];
 			
 			//initialize google map and the click callback
 			  function initMap() {
@@ -93,12 +93,12 @@
 				});
 				google.maps.event.addListener(map2D, 'click', function(event) {
 					newScene = true;
-					var baseBB = {minlat:event.latLng.lat()-0.005, minlon:event.latLng.lng()-0.005, maxlat:event.latLng.lat()+0.005, maxlon:event.latLng.lng()+0.005};
+					var baseBB = {minlat:event.latLng.lat()-fetchSize[1]/2, minlon:event.latLng.lng()-fetchSize[0]/2, maxlat:event.latLng.lat()+fetchSize[1]/2, maxlon:event.latLng.lng()+fetchSize[0]/2};
 					for(var i = 0 ; i< fetchTab.length; i++){
-						var bbToUse = {minlat:baseBB.minlat+fetchTab[i][1]*fetchSize, 
-									minlon:baseBB.minlon+fetchTab[i][0]*fetchSize, 
-									maxlat:baseBB.maxlat+fetchTab[i][1]*fetchSize, 
-									maxlon:baseBB.maxlon+fetchTab[i][0]*fetchSize};
+						var bbToUse = {minlat:baseBB.minlat+fetchTab[i][1]*fetchSize[1], 
+									minlon:baseBB.minlon+fetchTab[i][0]*fetchSize[0], 
+									maxlat:baseBB.maxlat+fetchTab[i][1]*fetchSize[1], 
+									maxlon:baseBB.maxlon+fetchTab[i][0]*fetchSize[0]};
 						tryGetOsmData(bbToUse);
 					}
 				});
@@ -148,8 +148,45 @@
 					});
 			}
 			
+			var eps = 0.0000001;
+			function between(a, b, c) {
+				return a-eps <= b && b <= c+eps;
+			}
+			function segment_intersection(x1,y1,x2,y2, x3,y3,x4,y4) {
+				var x=((x1*y2-y1*x2)*(x3-x4)-(x1-x2)*(x3*y4-y3*x4)) /
+						((x1-x2)*(y3-y4)-(y1-y2)*(x3-x4));
+				var y=((x1*y2-y1*x2)*(y3-y4)-(y1-y2)*(x3*y4-y3*x4)) /
+						((x1-x2)*(y3-y4)-(y1-y2)*(x3-x4));
+				if (isNaN(x)||isNaN(y)) {
+					return false;
+				} else {
+					if (x1>=x2) {
+						if (!between(x2, x, x1)) {return false;}
+					} else {
+						if (!between(x1, x, x2)) {return false;}
+					}
+					if (y1>=y2) {
+						if (!between(y2, y, y1)) {return false;}
+					} else {
+						if (!between(y1, y, y2)) {return false;}
+					}
+					if (x3>=x4) {
+						if (!between(x4, x, x3)) {return false;}
+					} else {
+						if (!between(x3, x, x4)) {return false;}
+					}
+					if (y3>=y4) {
+						if (!between(y4, y, y3)) {return false;}
+					} else {
+						if (!between(y3, y, y4)) {return false;}
+					}
+				}
+				return {x: x, y: y};
+			}
+			
 			function createRoadPoints(points,size){
 				var output = [];
+				var result = [];
 				for(var i =1;i<points.length;i++){
 					var diff= new THREE.Vector3().subVectors(points[i],points[i-1]);
 					diff.cross(new THREE.Vector3(0,0,1)).normalize().multiplyScalar(size);
@@ -158,7 +195,23 @@
 					output[((points.length-1)*2)+(points.length-1-i)*2]=new THREE.Vector3().subVectors(points[i],diff);
 					output[((points.length-1)*2)+(points.length-1-i)*2+1]=new THREE.Vector3().subVectors(points[i-1],diff);
 				}
-				return output;
+				
+				//split road into segments to avoid overlapping shapes that induce graphics bug (roundabout notably)
+				//no overhead at runtime since roads are merged into a single geometry
+				for (var i = 0; i < output.length/2-1;i++){
+					result[i]=[];
+					result[i][0]=output[i];
+					result[i][1]=output[i+1];
+					if(i%2){
+						result[i][3]=output[output.length-2-i];
+						result[i][2]=output[output.length-1-i];
+					}else{
+						result[i][2]=output[output.length-2-i];
+						result[i][3]=output[output.length-1-i];
+					}
+				}
+				
+				return result;
 			}
 			
 			function distance(lat1, lon1, lat2, lon2){  // generally used geo measurement function
@@ -256,11 +309,12 @@
 				var forestGeometry = new THREE.Geometry();
 				var grassGeometry = new THREE.Geometry();
 				var fieldGeometry = new THREE.Geometry();
+				
 				for (var wayId in data.ways){
 					var way = data.ways[wayId];
 					//building
 					
-					if (way.building){
+					if (way.building ){
 						var points = [];
 						for ( var i=0;i<way.nodes.length;i++){
 							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
@@ -275,7 +329,7 @@
 						
 						var geometry = new THREE.ExtrudeGeometry( shape , baseBuildingOptions);
 						
-						baseBuildingOptions.amount = 10;
+						
 						
 						buildingGeometry.merge(geometry);
 					}
@@ -296,10 +350,27 @@
 						if(way.highway == "track" || way.highway == "footway" || way.highway == "bridleway" || way.highway == "steps" || way.highway == "path"  || way.highway == "cycleway")
 							size = 1;
 						var shapePoints = createRoadPoints(points,size);
-						var shape = new THREE.Shape(shapePoints);
-						var geometry = new THREE.ShapeGeometry( shape );
-						
-						roadGeometry.merge(geometry);
+						for (var j=0;j<shapePoints.length;j++){
+							var shape = new THREE.Shape(shapePoints[j]);
+							var geometry = new THREE.ShapeGeometry( shape );
+							
+							roadGeometry.merge(geometry);
+						}
+						/*var material = new THREE.LineBasicMaterial({
+							color: 0x0000ff
+						});
+						var material2 = new THREE.LineBasicMaterial({
+							color: 0x00ff00
+						});
+
+						var geometry = new THREE.Geometry();
+						var geometry2 = new THREE.Geometry();
+						geometry.vertices = shapePoints[0];
+						geometry2.vertices = shapePoints[1];
+						var line = new THREE.Line( geometry, material );
+						var line2 = new THREE.Line( geometry2, material2 );
+						rootNode.add(line);*/
+						//rootNode.add(line2);
 						
 					}
 					
@@ -317,10 +388,12 @@
 						else if(way.waterway == "stream" )
 							size = 1;
 						var shapePoints = createRoadPoints(points,size);
-						var shape = new THREE.Shape(shapePoints);
-						var geometry = new THREE.ShapeGeometry( shape );
-						
-						riverGeometry.merge(geometry);
+						for (var j=0;j<shapePoints.length;j++){
+							var shape = new THREE.Shape(shapePoints[j]);
+							var geometry = new THREE.ShapeGeometry( shape );
+							
+							riverGeometry.merge(geometry);
+						}
 						
 					}
 					
