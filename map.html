@@ -57,7 +57,7 @@
 				//1*1
 				[0,0],
 				//3*3
-				/*[0,1],
+				[0,1],
 				[1,0],
 				[0,-1],
 				[-1,0],
@@ -81,7 +81,7 @@
 				[-2,-2],
 				[-2,-1],
 				[-2,0],
-				[-2,1]*/
+				[-2,1]
 			];
 			var fetchSize = [0.01,0.006];
 			
@@ -199,16 +199,20 @@
 				//split road into segments to avoid overlapping shapes that induce graphics bug (roundabout notably)
 				//no overhead at runtime since roads are merged into a single geometry
 				for (var i = 0; i < output.length/2-1;i++){
-					result[i]=[];
-					result[i][0]=output[i];
-					result[i][1]=output[i+1];
+					if(output[i].x==output[i+1].x && output[i].y==output[i+1].y &&
+					output[output.length-2-i].x==output[output.length-1-i].x && output[output.length-2-i].y==output[output.length-1-i].y)
+					{continue;}
+					var currentRes = [];
+					currentRes[0]=output[i];
+					currentRes[1]=output[i+1];
 					if(i%2){
-						result[i][3]=output[output.length-2-i];
-						result[i][2]=output[output.length-1-i];
+						currentRes[3]=output[output.length-2-i];
+						currentRes[2]=output[output.length-1-i];
 					}else{
-						result[i][2]=output[output.length-2-i];
-						result[i][3]=output[output.length-1-i];
+						currentRes[2]=output[output.length-2-i];
+						currentRes[3]=output[output.length-1-i];
 					}
+					result.push(currentRes);
 				}
 				
 				return result;
@@ -226,7 +230,7 @@
 				return d * 1000; // meters
 			}
 			
-			
+			var currentBounds = null;
 			//convert latlon into scene positions
 			function build3DPos(data) {
 				var bounds = data.bounds;
@@ -269,6 +273,10 @@
 				}
 				
 				bounds.center = center;
+				bounds.maxX = -center.x + ((maxLongDiff+minLongDiff)/4);
+				bounds.minX = -center.x - ((maxLongDiff+minLongDiff)/4);
+				bounds.maxY = -center.y + ((maxLatDiff+minLatDiff)/4);
+				bounds.minY = -center.y - ((maxLatDiff+minLatDiff)/4);
 				
 				for (var nodeId in data.nodes){
 					var node = data.nodes[nodeId];
@@ -277,6 +285,8 @@
 					node.y = -center.y + locLatDiff *bounds.latRatio;
 					node.x = -center.x + locLonDiff *bounds.lonRatio;
 				}
+				
+				currentBounds = bounds;
 				
 			}
 			
@@ -315,10 +325,12 @@
 					//building
 					
 					if (way.building ){
+						if(way.nodes.length<3){continue;}
 						var points = [];
 						for ( var i=0;i<way.nodes.length;i++){
 							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
 						}
+						
 						var shape = new THREE.Shape(points);
 						
 						if(way.height){
@@ -329,7 +341,7 @@
 						
 						var geometry = new THREE.ExtrudeGeometry( shape , baseBuildingOptions);
 						
-						
+						baseBuildingOptions.amount = 10;
 						
 						buildingGeometry.merge(geometry);
 					}
@@ -349,28 +361,34 @@
 							size = 3;
 						if(way.highway == "track" || way.highway == "footway" || way.highway == "bridleway" || way.highway == "steps" || way.highway == "path"  || way.highway == "cycleway")
 							size = 1;
+						
 						var shapePoints = createRoadPoints(points,size);
+						
 						for (var j=0;j<shapePoints.length;j++){
 							var shape = new THREE.Shape(shapePoints[j]);
 							var geometry = new THREE.ShapeGeometry( shape );
 							
 							roadGeometry.merge(geometry);
 						}
+						
+						
 						/*var material = new THREE.LineBasicMaterial({
 							color: 0x0000ff
 						});
 						var material2 = new THREE.LineBasicMaterial({
 							color: 0x00ff00
 						});
-
-						var geometry = new THREE.Geometry();
-						var geometry2 = new THREE.Geometry();
-						geometry.vertices = shapePoints[0];
-						geometry2.vertices = shapePoints[1];
-						var line = new THREE.Line( geometry, material );
-						var line2 = new THREE.Line( geometry2, material2 );
-						rootNode.add(line);*/
+						for (var j=0;j<shapePoints.length;j++){
+							var geometry = new THREE.Geometry();
+							//var geometry2 = new THREE.Geometry();
+							geometry.vertices = shapePoints[j];
+							//geometry2.vertices = shapePoints[1];
+							var line = new THREE.Line( geometry, material );
+							//var line2 = new THREE.Line( geometry2, material2 );
+							rootNode.add(line);
+						}
 						//rootNode.add(line2);
+						}*/
 						
 					}
 					
@@ -400,6 +418,7 @@
 					//water
 					
 					if((way.waterway && way.waterway == "riverbank")||( way.natural && way.natural=="water" ) || (way.landuse && way.landuse=="basin")){
+						if(way.nodes.length<3){continue;}
 						var points = [];
 						for ( var i=0;i<way.nodes.length;i++){
 							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
@@ -414,10 +433,12 @@
 					
 					//forest
 					if(way.landuse && (way.landuse=="plant_nursery" || way.landuse=="forest")){
+						if(way.nodes.length<3){continue;}
 						var points = [];
 						for ( var i=0;i<way.nodes.length;i++){
 							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
 						}
+						
 						var shape = new THREE.Shape(points);
 						
 						var geometry = new THREE.ShapeGeometry( shape );
@@ -428,10 +449,12 @@
 					
 					//grass
 					if(way.landuse && (way.landuse=="grass" || way.landuse=="greenfield" || way.landuse=="meadow"  || way.landuse=="recreation_ground"  || way.landuse=="village_green")){
+						if(way.nodes.length<3){continue;}
 						var points = [];
 						for ( var i=0;i<way.nodes.length;i++){
 							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
 						}
+						
 						var shape = new THREE.Shape(points);
 						
 						var geometry = new THREE.ShapeGeometry( shape );
@@ -442,10 +465,12 @@
 					
 					//field
 					if(way.landuse && (way.landuse=="vineyard" || way.landuse=="orchad" || way.landuse=="greenhouse_horticulture"  || way.landuse=="farmland"  || way.landuse=="allotments")){
+						if(way.nodes.length<3){continue;}
 						var points = [];
 						for ( var i=0;i<way.nodes.length;i++){
 							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
 						}
+						
 						var shape = new THREE.Shape(points);
 						
 						var geometry = new THREE.ShapeGeometry( shape );
@@ -661,7 +686,7 @@
 
 				var i;
 
-				camera = new THREE.PerspectiveCamera( 33, div.clientWidth / div.clientHeight, 1, 100000 );
+				camera = new THREE.PerspectiveCamera( 33, div.clientWidth / div.clientHeight, 1, 10000 );
 				//camera = new THREE.OrthographicCamera( window.innerWidth / - 2, window.innerWidth / 2, window.innerHeight / 2, window.innerHeight / - 2, -500, 100000 );
 				camera.position.z = 1500;
 				camera.position.y = -1500;
@@ -669,6 +694,7 @@
 				
 
 				scene = new THREE.Scene();
+				//scene.fog = new THREE.Fog(colors.background, 1.500, 10000);
 				scene.add(camera);
 				var directionalLight = new THREE.DirectionalLight( 0xffffff, 0.5 );
 				directionalLight.position.set( 100, 0, 100 ).normalize();
@@ -775,6 +801,7 @@
 					resetCam=false;
 					camera.position.z = 1500;
 					camera.position.y = -1500;
+					camera.position.x = 0;
 					var lookAtPos = new THREE.Vector3();
 				}else{
 				
