@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<meta http-equiv="Content-Security-Policy" content="default-src *; script-src 'self' 'unsafe-inline' 'unsafe-eval' *; style-src 'self' 'unsafe-inline' *;">
 <html lang="en">
 	<head>
 		<title>map</title>
@@ -11,11 +12,28 @@
 				height: 25%;
 				width: 50%;
 			  }
+			  
+			#options {
+				margin-left: auto;
+				margin-right: auto;
+				width: 50%;
+				overflow:hidden;
+			}
+			
+			
+			#options-1 {
+				overflow:hidden;
+				float: left;
+			}
+			#options-2 {
+				overflow:hidden;
+				float: right;
+			}
 			 
 			#map3D {
 				margin-left: auto;
 				margin-right: auto;
-				height: 73%;
+				height: 68%;
 				width: 98%;
 			}
 			
@@ -33,6 +51,18 @@
 	<body>
 		<div id="map2D"></div>
 		<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAmbuaq4mFgxcUJBc7TXKNXJKfDchYss-w&callback=initMap" async defer></script>
+			<div id=options>
+				<div id=options-1>
+				<input type="radio" name="mapType" id="osmdata" value="0"  /><label for="osmdata">OSMdata</label>
+				<input type="radio" name="mapType" id="satellite" value="1"  /><label for="event">Satellite</label>
+				<input type="radio" name="mapType" id="hybride" value="2" checked="true"  /><label for="event">Hybride</label>
+				</div>
+				<div id=options-2>
+				<input type="radio" name="mapSize" id="1x1" value="1"  /><label for="osmdata">1x1</label>
+				<input type="radio" name="mapSize" id="3x3" value="9" checked="true"  /><label for="event">3x3</label>
+				<input type="radio" name="mapSize" id="5x5" value="25"  /><label for="event">5x5</label>
+				</div>
+			</div>
 		
 		<div id="map3D"></div>
 		<script src="three.js"></script>
@@ -48,6 +78,8 @@
 			
 			var newScene = false;
 			var resetCam = false;
+			
+			var showSatellite = "1";
 			
 			var map2D;
 			
@@ -83,7 +115,30 @@
 				[-2,0],
 				[-2,1]
 			];
-			var fetchSize = [0.01,0.006];
+			var fetchSize = [0.01,0.01];
+			
+			function getRadioValue(theRadioGroup)
+			{
+				var elements = document.getElementsByName(theRadioGroup);
+				for (var i = 0, l = elements.length; i < l; i++)
+				{
+					if (elements[i].checked)
+					{
+						return elements[i].value;
+					}
+				}
+			}
+			
+			function getFetchSize(latlon){
+				var Xmeters = distance(latlon.lat(),latlon.lng()-0.01,latlon.lat(),latlon.lng()+0.01);
+				var Ymeters = distance(latlon.lat()-0.01,latlon.lng(),latlon.lat()+0.01,latlon.lng());
+				
+				var lonPerMeter = 0.02/Xmeters;
+				var latPerMeter = 0.02/Ymeters;
+				
+				return [500*lonPerMeter,500*latPerMeter];
+			
+			}
 			
 			//initialize google map and the click callback
 			  function initMap() {
@@ -93,8 +148,11 @@
 				});
 				google.maps.event.addListener(map2D, 'click', function(event) {
 					newScene = true;
+					fetchSize = getFetchSize(event.latLng);
 					var baseBB = {minlat:event.latLng.lat()-fetchSize[1]/2, minlon:event.latLng.lng()-fetchSize[0]/2, maxlat:event.latLng.lat()+fetchSize[1]/2, maxlon:event.latLng.lng()+fetchSize[0]/2};
-					for(var i = 0 ; i< fetchTab.length; i++){
+					var fetchAmount = getRadioValue("mapSize");
+					showSatellite = getRadioValue("mapType");
+					for(var i = 0 ; i< fetchAmount; i++){
 						var bbToUse = {minlat:baseBB.minlat+fetchTab[i][1]*fetchSize[1], 
 									minlon:baseBB.minlon+fetchTab[i][0]*fetchSize[0], 
 									maxlat:baseBB.maxlat+fetchTab[i][1]*fetchSize[1], 
@@ -141,11 +199,77 @@
 							var node = new THREE.Object3D();
 							root.add(node);
 							buildData(mapData, node);
-							
 							loadStatus=0;
+							var satNode=  new THREE.Object3D();
+							node.add(satNode);
+							satNode.name = "satellite";
+							if(showSatellite == "0")
+								satNode.visible = false;
+							getSatelliteView(mapData.bounds,satNode);
+							
+							
 						});
 					  }
 					});
+			}
+			
+			
+			var loader = new THREE.TextureLoader();
+			loader.crossOrigin="anonymous";
+			
+			function getSatelliteView(bounds,node){
+				var meterPerPixel = 0.5972 * Math.cos(((bounds.minLat+bounds.maxLat)/2)*Math.PI/180);
+				var XDist = bounds.maxX - bounds.minX;
+				var YDist = bounds.maxY - bounds.minY;
+				
+				var XPix = Math.round(XDist / meterPerPixel);
+				var YPix = Math.round(YDist / meterPerPixel);
+				
+				var nbTexX = Math.ceil(XPix/640);
+				var nbTexY = Math.ceil(YPix/640);
+				
+				var nbPixX = Math.round(XPix/nbTexX);
+				var nbPixY = Math.round(YPix/nbTexY);
+				
+				for(var i=0;i<nbTexX;i++){
+					for(var j=0;j<nbTexY;j++){
+						var iRatioMin= i/nbTexX;
+						var jRatioMin= j/nbTexY;
+						var iRatioMax= (i+1)/nbTexX;
+						var jRatioMax= (j+1)/nbTexY;
+						
+						var upLeftCoord={x:(bounds.minLon*(1-iRatioMin)+bounds.maxLon*iRatioMin)
+										,y:(bounds.minLat*(1-jRatioMin)+bounds.maxLat*jRatioMin)};
+						var upRightCoord={x:(bounds.minLon*(1-iRatioMin)+bounds.maxLon*iRatioMin)
+										,y:(bounds.minLat*(1-jRatioMax)+bounds.maxLat*jRatioMax)};
+						var downLeftCoord={x:(bounds.maLon*(1-iRatioMax)+bounds.maxLon*iRatioMax)
+										,y:(bounds.minLat*(1-jRatioMin)+bounds.maxLat*jRatioMin)};
+						var downRightCoord={x:(bounds.minLon*(1-iRatioMax)+bounds.maxLon*iRatioMax)
+										,y:(bounds.minLat*(1-jRatioMax)+bounds.maxLat*jRatioMax)};
+										
+						var currentBounds = {minX :  bounds.minX*(1-iRatioMin)+bounds.maxX*iRatioMin,
+											maxX :  bounds.minX*(1-iRatioMax)+bounds.maxX*iRatioMax,
+											minY :  bounds.minY*(1-jRatioMin)+bounds.maxY*jRatioMin,
+											maxY :  bounds.minY*(1-jRatioMax)+bounds.maxY*jRatioMax,
+											};
+						
+						var url = "https://maps.googleapis.com/maps/api/staticmap?maptype=satellite&center="+((upLeftCoord.y+downRightCoord.y)/2)+","+((upLeftCoord.x+downRightCoord.x)/2)+"&zoom=18&scale=2&size="+nbPixX+"x"+nbPixY+"&key=AIzaSyAmbuaq4mFgxcUJBc7TXKNXJKfDchYss-w";
+						var texture = loader.load(
+							url,
+							function ( texture ) {
+							},
+							null,
+							function ( xhr ) {
+								console.log( 'An error happened' );
+							}
+						);
+						
+						var material = new THREE.MeshBasicMaterial( {
+							map: texture
+						 } );
+						 addSatelliteQuad(currentBounds,material,node);
+					}
+				}
 			}
 			
 			var eps = 0.0000001;
@@ -212,6 +336,8 @@
 						currentRes[2]=output[output.length-2-i];
 						currentRes[3]=output[output.length-1-i];
 					}
+					if(currentRes[0].x==currentRes[3].x && currentRes[0].y==currentRes[3].y && currentRes[1].x==currentRes[2].x && currentRes[1].y==currentRes[2].y)
+						continue;
 					result.push(currentRes);
 				}
 				
@@ -290,6 +416,40 @@
 				
 			}
 			
+			
+			function addSatelliteQuad(bounds,material,rootNode){
+				var geometry = new THREE.BufferGeometry();
+				// create a simple square shape. We duplicate the top left and bottom right
+				// vertices because each vertex needs to appear once per triangle.
+				var vertices = new Float32Array( [
+					
+					
+					bounds.minX,bounds.minY,  0.0,
+					bounds.maxX,bounds.minY,  0.0,
+					bounds.minX,bounds.maxY,  0.0,
+
+					
+					bounds.minX,bounds.maxY,  0.0,
+					bounds.maxX,bounds.minY,  0.0,
+					bounds.maxX,bounds.maxY,  0.0
+				] );
+				geometry.addAttribute( 'position', new THREE.BufferAttribute( vertices, 3 ) );
+				var uv = new Float32Array( [
+					
+					0.0, 0.0,
+					1.0, 0.0,
+					0.0, 1.0,
+					
+					0.0, 1.0,
+					1.0, 0.0,
+					1.0, 1.0
+				] );
+				geometry.addAttribute( 'uv', new THREE.BufferAttribute( uv, 2 ) );
+				var boundmesh = new THREE.Mesh( geometry, material ) ;
+				rootNode.add( boundmesh );
+				
+			}
+			
 			//create geometry
 			var countBuildData = 1;
 			function buildData(data,rootNode) {
@@ -346,139 +506,136 @@
 						buildingGeometry.merge(geometry);
 					}
 					
-					
-					//road
-					
-					if(way.highway){
-						var points = [];
-						for ( var i=0;i<way.nodes.length;i++){
-							points.push(new THREE.Vector3(way.nodes[i].x,way.nodes[i].y,0.0));
-						}
-						var size = 2;
-						if(way.highway == "motorway" || way.highway == "motorway_link" || way.highway == "trunk" || way.highway == "trunk_link" || way.highway == "primary" || way.highway == "primary_link")
-							size = 5;
-						if(way.highway == "secondary" || way.highway == "secondary_link" || way.highway == "tertiary" || way.highway == "tertiary_link")
-							size = 3;
-						if(way.highway == "track" || way.highway == "footway" || way.highway == "bridleway" || way.highway == "steps" || way.highway == "path"  || way.highway == "cycleway")
-							size = 1;
+						//road
 						
-						var shapePoints = createRoadPoints(points,size);
-						
-						for (var j=0;j<shapePoints.length;j++){
-							var shape = new THREE.Shape(shapePoints[j]);
-							var geometry = new THREE.ShapeGeometry( shape );
+						if(way.highway){
+							var points = [];
+							for ( var i=0;i<way.nodes.length;i++){
+								points.push(new THREE.Vector3(way.nodes[i].x,way.nodes[i].y,0.0));
+							}
+							var size = 2;
+							if(way.highway == "motorway" || way.highway == "motorway_link" || way.highway == "trunk" || way.highway == "trunk_link" || way.highway == "primary" || way.highway == "primary_link")
+								size = 5;
+							if(way.highway == "secondary" || way.highway == "secondary_link" || way.highway == "tertiary" || way.highway == "tertiary_link")
+								size = 3;
+							if(way.highway == "track" || way.highway == "footway" || way.highway == "bridleway" || way.highway == "steps" || way.highway == "path"  || way.highway == "cycleway")
+								size = 1;
 							
-							roadGeometry.merge(geometry);
+							var shapePoints = createRoadPoints(points,size);
+							
+							for (var j=0;j<shapePoints.length;j++){
+								var shape = new THREE.Shape(shapePoints[j]);
+								var geometry = new THREE.ShapeGeometry( shape );
+								
+								roadGeometry.merge(geometry);
+							}
+							
+							
+							/*var material = new THREE.LineBasicMaterial({
+								color: 0x0000ff
+							});
+							var material2 = new THREE.LineBasicMaterial({
+								color: 0x00ff00
+							});
+							for (var j=0;j<shapePoints.length;j++){
+								var geometry = new THREE.Geometry();
+								//var geometry2 = new THREE.Geometry();
+								geometry.vertices = shapePoints[j];
+								//geometry2.vertices = shapePoints[1];
+								var line = new THREE.Line( geometry, material );
+								//var line2 = new THREE.Line( geometry2, material2 );
+								rootNode.add(line);
+							}
+							//rootNode.add(line2);
+							}*/
+							
+						}
+						//river
+						
+						if(way.waterway && way.waterway != "riverbank"){
+							var points = [];
+							for ( var i=0;i<way.nodes.length;i++){
+								points.push(new THREE.Vector3(way.nodes[i].x,way.nodes[i].y,0.0));
+							}
+							var size = 3;
+							if(way.width){
+								size = way.width/2;
+							}
+							else if(way.waterway == "stream" )
+								size = 1;
+							var shapePoints = createRoadPoints(points,size);
+							for (var j=0;j<shapePoints.length;j++){
+								var shape = new THREE.Shape(shapePoints[j]);
+								var geometry = new THREE.ShapeGeometry( shape );
+								
+								riverGeometry.merge(geometry);
+							}
+							
 						}
 						
+						//water
 						
-						/*var material = new THREE.LineBasicMaterial({
-							color: 0x0000ff
-						});
-						var material2 = new THREE.LineBasicMaterial({
-							color: 0x00ff00
-						});
-						for (var j=0;j<shapePoints.length;j++){
-							var geometry = new THREE.Geometry();
-							//var geometry2 = new THREE.Geometry();
-							geometry.vertices = shapePoints[j];
-							//geometry2.vertices = shapePoints[1];
-							var line = new THREE.Line( geometry, material );
-							//var line2 = new THREE.Line( geometry2, material2 );
-							rootNode.add(line);
-						}
-						//rootNode.add(line2);
-						}*/
-						
-					}
-					
-					//river
-					
-					if(way.waterway && way.waterway != "riverbank"){
-						var points = [];
-						for ( var i=0;i<way.nodes.length;i++){
-							points.push(new THREE.Vector3(way.nodes[i].x,way.nodes[i].y,0.0));
-						}
-						var size = 3;
-						if(way.width){
-							size = way.width/2;
-						}
-						else if(way.waterway == "stream" )
-							size = 1;
-						var shapePoints = createRoadPoints(points,size);
-						for (var j=0;j<shapePoints.length;j++){
-							var shape = new THREE.Shape(shapePoints[j]);
+						if((way.waterway && way.waterway == "riverbank")||( way.natural && way.natural=="water" ) || (way.landuse && way.landuse=="basin")){
+							if(way.nodes.length<3){continue;}
+							var points = [];
+							for ( var i=0;i<way.nodes.length;i++){
+								points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+							}
+							var shape = new THREE.Shape(points);
+							
 							var geometry = new THREE.ShapeGeometry( shape );
 							
 							riverGeometry.merge(geometry);
+							
 						}
 						
-					}
-					
-					//water
-					
-					if((way.waterway && way.waterway == "riverbank")||( way.natural && way.natural=="water" ) || (way.landuse && way.landuse=="basin")){
-						if(way.nodes.length<3){continue;}
-						var points = [];
-						for ( var i=0;i<way.nodes.length;i++){
-							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
-						}
-						var shape = new THREE.Shape(points);
-						
-						var geometry = new THREE.ShapeGeometry( shape );
-						
-						riverGeometry.merge(geometry);
-						
-					}
-					
-					//forest
-					if(way.landuse && (way.landuse=="plant_nursery" || way.landuse=="forest")){
-						if(way.nodes.length<3){continue;}
-						var points = [];
-						for ( var i=0;i<way.nodes.length;i++){
-							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+						//forest
+						if(way.landuse && (way.landuse=="plant_nursery" || way.landuse=="forest")){
+							if(way.nodes.length<3){continue;}
+							var points = [];
+							for ( var i=0;i<way.nodes.length;i++){
+								points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+							}
+							
+							var shape = new THREE.Shape(points);
+							
+							var geometry = new THREE.ShapeGeometry( shape );
+							
+							forestGeometry.merge(geometry);
+							
 						}
 						
-						var shape = new THREE.Shape(points);
-						
-						var geometry = new THREE.ShapeGeometry( shape );
-						
-						forestGeometry.merge(geometry);
-						
-					}
-					
-					//grass
-					if(way.landuse && (way.landuse=="grass" || way.landuse=="greenfield" || way.landuse=="meadow"  || way.landuse=="recreation_ground"  || way.landuse=="village_green")){
-						if(way.nodes.length<3){continue;}
-						var points = [];
-						for ( var i=0;i<way.nodes.length;i++){
-							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+						//grass
+						if(way.landuse && (way.landuse=="grass" || way.landuse=="greenfield" || way.landuse=="meadow"  || way.landuse=="recreation_ground"  || way.landuse=="village_green")){
+							if(way.nodes.length<3){continue;}
+							var points = [];
+							for ( var i=0;i<way.nodes.length;i++){
+								points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+							}
+							
+							var shape = new THREE.Shape(points);
+							
+							var geometry = new THREE.ShapeGeometry( shape );
+							
+							grassGeometry.merge(geometry);
+							
 						}
 						
-						var shape = new THREE.Shape(points);
-						
-						var geometry = new THREE.ShapeGeometry( shape );
-						
-						grassGeometry.merge(geometry);
-						
-					}
-					
-					//field
-					if(way.landuse && (way.landuse=="vineyard" || way.landuse=="orchad" || way.landuse=="greenhouse_horticulture"  || way.landuse=="farmland"  || way.landuse=="allotments")){
-						if(way.nodes.length<3){continue;}
-						var points = [];
-						for ( var i=0;i<way.nodes.length;i++){
-							points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+						//field
+						if(way.landuse && (way.landuse=="vineyard" || way.landuse=="orchad" || way.landuse=="greenhouse_horticulture"  || way.landuse=="farmland"  || way.landuse=="allotments")){
+							if(way.nodes.length<3){continue;}
+							var points = [];
+							for ( var i=0;i<way.nodes.length;i++){
+								points.push(new THREE.Vector2(way.nodes[i].x,way.nodes[i].y));
+							}
+							
+							var shape = new THREE.Shape(points);
+							
+							var geometry = new THREE.ShapeGeometry( shape );
+							
+							fieldGeometry.merge(geometry);
+							
 						}
-						
-						var shape = new THREE.Shape(points);
-						
-						var geometry = new THREE.ShapeGeometry( shape );
-						
-						fieldGeometry.merge(geometry);
-						
-					}
-					
 					
 				}
 				
@@ -576,6 +733,17 @@
 					}
 				}
 				
+				var roadNode = new THREE.Object3D();
+				rootNode.add(roadNode);
+				roadNode.name = "road";
+				if(showSatellite=="1")
+					roadNode.visible = false;
+				
+				var otherNode = new THREE.Object3D();
+				rootNode.add(otherNode);
+				otherNode.name = "other";
+				if(showSatellite!="0")
+					otherNode.visible = false;
 				
 				var buildingMaterial = new THREE.MeshLambertMaterial( { color: colors.building.diffuse, emissive: colors.building.ambient } );
 				var buildingMesh = new THREE.Mesh( buildingGeometry, buildingMaterial ) ;
@@ -583,28 +751,28 @@
 				
 				var roadMaterial = new THREE.MeshLambertMaterial( { color: colors.road.diffuse, emissive: colors.road.ambient, side : THREE.DoubleSide } );
 				var roadMesh = new THREE.Mesh( roadGeometry, roadMaterial );
-				roadMesh.position.z = 0.4;
-				rootNode.add(roadMesh);
+				roadMesh.position.z = 1.0;
+				roadNode.add(roadMesh);
 				
 				var riverMaterial = new THREE.MeshLambertMaterial( { color: colors.water.diffuse, emissive: colors.water.ambient, side : THREE.DoubleSide } );
 				var riverMesh = new THREE.Mesh( riverGeometry, riverMaterial );
 				riverMesh.position.z = 0.0;
-				rootNode.add(riverMesh);
+				otherNode.add(riverMesh);
 				
 				var forestMaterial = new THREE.MeshLambertMaterial( { color: colors.forest.diffuse, emissive: colors.forest.ambient, side : THREE.DoubleSide } );
 				var forestMesh = new THREE.Mesh( forestGeometry, forestMaterial );
 				forestMesh.position.z = -0.4;
-				rootNode.add(forestMesh);
+				otherNode.add(forestMesh);
 				
 				var grassMaterial = new THREE.MeshLambertMaterial( { color: colors.grass.diffuse, emissive: colors.grass.ambient, side : THREE.DoubleSide } );
 				var grassMesh = new THREE.Mesh( grassGeometry, grassMaterial );
 				grassMesh.position.z = -0.2;
-				rootNode.add(grassMesh);
+				otherNode.add(grassMesh);
 				
 				var fieldMaterial = new THREE.MeshLambertMaterial( { color: colors.field.diffuse, emissive: colors.field.ambient, side : THREE.DoubleSide } );
 				var fieldMesh = new THREE.Mesh( fieldGeometry, fieldMaterial );
 				fieldMesh.position.z = -0.2;
-				rootNode.add(fieldMesh);
+				otherNode.add(fieldMesh);
 			}
 			
 			//parse received xml into a usable json
@@ -667,7 +835,7 @@
 				}
 			}
 			
-			var mouseX = 0, mouseY = 0, forward = 0, backward = 0,
+			var mouseX = 0, mouseY = 0, mouseDown = 0, forward = 0, backward = 0, leftward = 0, rightward = 0, upward = 0,downward = 0,
 
 			windowHalfX = window.innerWidth / 2,
 			windowHalfY = window.innerHeight / 2,
@@ -677,12 +845,75 @@
 
 			init();
 			animate();
+			
+			function mapTypeChangeToOSMData(){
+				console.log("osmdata");
+				showSatellite = getRadioValue("mapType");
+				if(root){
+				for(var i=0;i<root.children.length;i++){
+					var node = root.children[i];
+					if(node.children){
+						for(var j=0;j<node.children.length;j++){
+						if(node.children[j].name =="satellite")
+							node.children[j].visible = false;
+						if(node.children[j].name =="road")
+							node.children[j].visible = true;
+						if(node.children[j].name =="other")
+							node.children[j].visible = true;
+						}
+					}
+				}
+				}
+			}
+			function mapTypeChangeToSatellite(){
+				console.log("satellite");
+				showSatellite = getRadioValue("mapType");
+				if(root){
+				for(var i=0;i<root.children.length;i++){
+					var node = root.children[i];
+					if(node.children){
+						for(var j=0;j<node.children.length;j++){
+						if(node.children[j].name =="satellite")
+							node.children[j].visible = true;
+						if(node.children[j].name =="road")
+							node.children[j].visible = false;
+						if(node.children[j].name =="other")
+							node.children[j].visible = false;
+						}
+					}
+				}
+				}
+			}
+			function mapTypeChangeToHybrid(){
+				console.log("hybride");
+				showSatellite = getRadioValue("mapType");
+				if(root){
+				for(var i=0;i<root.children.length;i++){
+					var node = root.children[i];
+					if(node.children){
+						for(var j=0;j<node.children.length;j++){
+						if(node.children[j].name =="satellite")
+							node.children[j].visible = true;
+						if(node.children[j].name =="road")
+							node.children[j].visible = true;
+						if(node.children[j].name =="other")
+							node.children[j].visible = false;
+						}
+					}
+				}
+				}
+			}
 
 			function init() {
 			
-				
-			
 				div  = document.getElementById('map3D');
+				
+				var radio1 = document.getElementById('osmdata');
+				radio1.addEventListener("change",mapTypeChangeToOSMData);
+				var radio2 = document.getElementById('satellite');
+				radio2.addEventListener("change",mapTypeChangeToSatellite);
+				var radio3 = document.getElementById('hybride');
+				radio3.addEventListener("change",mapTypeChangeToHybrid);
 
 				var i;
 
@@ -715,10 +946,12 @@
 				div.appendChild( renderer.domElement );
 				
 
-				div.addEventListener( 'mousemove', onDocumentMouseMove, false );
-				div.addEventListener( 'mouseleave', onDocumentMouseLeave, false );
-				div.addEventListener( 'mousedown', onDocumentMouseDown, false );
-				div.addEventListener( 'mouseup', onDocumentMouseUp, false );
+				div.addEventListener( 'mousemove', onCanvasMouseMove, false );
+				div.addEventListener( 'mouseleave', onCanvasMouseLeave, false );
+				div.addEventListener( 'mousedown', onCanvasMouseDown, false );
+				div.addEventListener( 'mouseup', onCanvasMouseUp, false );
+				document.addEventListener( 'keydown', onCanvasKeyDown, false );
+				document.addEventListener( 'keyup', onCanvasKeyUp, false );
 
 				//
 
@@ -746,6 +979,8 @@
 				camera.right = width / 2;
 				camera.top = height / 2;
 				camera.bottom = height / - 2;
+				
+				camera.aspect = width/height;
 
 				camera.updateProjectionMatrix();
 
@@ -755,34 +990,68 @@
 
 			//interaction TODO Update
 
-			function onDocumentMouseMove( event ) {
+			function onCanvasMouseMove( event ) {
 
 				mouseX = event.offsetX - windowHalfX;
 				mouseY = event.offsetY - windowHalfY;
 
 			}
-			function onDocumentMouseLeave( event ) {
+			function onCanvasMouseLeave( event ) {
 
 				mouseX = 0;
 				mouseY = 0;
 
 			}
 			
-			function onDocumentMouseDown( event ) {
+			function onCanvasMouseDown( event ) {
 
-				if(event.which === 1)
-					forward = 1;
-				else if(event.which=== 2)
-					backward = 1;
+				mouseDown = true;
 
 			}
 			
-			function onDocumentMouseUp( event ) {
+			function onCanvasMouseUp( event ) {
 
-				forward = 0;
-				backward = 0;
+				mouseDown = false;
 
 			}
+			
+			function onCanvasKeyDown( event ) {
+
+				if(event.key=="q"){
+					leftward = true;
+				}else if(event.key=="z"){
+					forward = true;
+				}else if(event.key=="d"){
+					rightward = true;
+				}else if(event.key=="s"){
+					backward = true;
+				}else if(event.key=="a"){
+					upward = true;
+				}else if(event.key=="e"){
+					downward = true;
+				}
+
+			}
+			
+			function onCanvasKeyUp( event ) {
+
+				if(event.key=="q"){
+					leftward = false;
+				}else if(event.key=="z"){
+					forward = false;
+				}else if(event.key=="d"){
+					rightward = false;
+				}else if(event.key=="s"){
+					backward = false;
+				}else if(event.key=="a"){
+					upward = false;
+				}else if(event.key=="e"){
+					downward = false;
+				}
+
+			}
+			
+			
 
 			
 
@@ -808,9 +1077,9 @@
 					var camDir = camera.getWorldDirection();
 					var right = new THREE.Vector3().crossVectors(camDir,new THREE.Vector3(0,0,1));
 
-					var lookAtPos= new THREE.Vector3().addVectors(camera.position,camDir.normalize().multiplyScalar(100));
 					
-					if(Math.abs(mouseX) > window.innerWidth / 8){
+					
+					/*if(Math.abs(mouseX) > window.innerWidth / 8){
 					
 						if(mouseX < 0)
 							lookAtPos.sub(right.normalize());
@@ -825,17 +1094,29 @@
 						else
 							lookAtPos.add(new THREE.Vector3(0,0,1));
 					
-					}
+					}*/
 				
 				
 					if(forward){
-						camera.position.add(camDir.normalize().multiplyScalar(10));
+						camera.position.add(new THREE.Vector3(camDir.x,camDir.y,0).normalize().multiplyScalar(10));
 					}else if(backward){
-						camera.position.sub(camDir.normalize().multiplyScalar(10));
+						camera.position.sub(new THREE.Vector3(camDir.x,camDir.y,0).normalize().multiplyScalar(10));
 					}
-					if(camera.position.z < 1){
-						camera.position.z = 1;
+					if(rightward){
+						camera.position.add(right.normalize().multiplyScalar(10));
+					}else if(leftward){
+						camera.position.sub(right.normalize().multiplyScalar(10));
 					}
+					if(upward){
+						camera.position.add(new THREE.Vector3(0,0,1).multiplyScalar(10));
+					}else if(downward){
+						camera.position.sub(new THREE.Vector3(0,0,1).multiplyScalar(10));
+					}
+					if(camera.position.z < 2){
+						camera.position.z = 2;
+					}
+					
+					var lookAtPos= new THREE.Vector3().addVectors(camera.position,camDir.normalize().multiplyScalar(100));
 				
 				}
 				
