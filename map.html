@@ -30,11 +30,12 @@
 				float: right;
 			}
 			 
-			#map3D {
+			#map3D{
 				margin-left: auto;
 				margin-right: auto;
-				height: 68%;
+				height: 70%;
 				width: 98%;
+				border: 2px solid green;
 			}
 			
 			html, body {
@@ -64,7 +65,9 @@
 				</div>
 			</div>
 		
-		<div id="map3D"></div>
+		<div id="map3D">
+		</div>
+		
 		<script src="three.js"></script>
 		<script src="colors.js"></script>
 
@@ -72,9 +75,13 @@
 			
 			var div;
 			
+			div  = document.getElementById('map3D');
+			
 			var OSMData;
 			var mapData = {};
 			var loadStatus=0;
+			var fullyLoaded = -1;
+			var fetchedCount = 0;
 			
 			var newScene = false;
 			var resetCam = false;
@@ -147,17 +154,22 @@
 				  zoom: 12
 				});
 				google.maps.event.addListener(map2D, 'click', function(event) {
-					newScene = true;
-					fetchSize = getFetchSize(event.latLng);
-					var baseBB = {minlat:event.latLng.lat()-fetchSize[1]/2, minlon:event.latLng.lng()-fetchSize[0]/2, maxlat:event.latLng.lat()+fetchSize[1]/2, maxlon:event.latLng.lng()+fetchSize[0]/2};
-					var fetchAmount = getRadioValue("mapSize");
-					showSatellite = getRadioValue("mapType");
-					for(var i = 0 ; i< fetchAmount; i++){
-						var bbToUse = {minlat:baseBB.minlat+fetchTab[i][1]*fetchSize[1], 
-									minlon:baseBB.minlon+fetchTab[i][0]*fetchSize[0], 
-									maxlat:baseBB.maxlat+fetchTab[i][1]*fetchSize[1], 
-									maxlon:baseBB.maxlon+fetchTab[i][0]*fetchSize[0]};
-						tryGetOsmData(bbToUse);
+					if(fullyLoaded!=0){
+						newScene = true;
+						fullyLoaded = 0;
+						fetchedCount = 0;
+						div.style["border-color"] = "orange";
+						fetchSize = getFetchSize(event.latLng);
+						var baseBB = {minlat:event.latLng.lat()-fetchSize[1]/2, minlon:event.latLng.lng()-fetchSize[0]/2, maxlat:event.latLng.lat()+fetchSize[1]/2, maxlon:event.latLng.lng()+fetchSize[0]/2};
+						var fetchAmount = getRadioValue("mapSize");
+						showSatellite = getRadioValue("mapType");
+						for(var i = 0 ; i< fetchAmount; i++){
+							var bbToUse = {minlat:baseBB.minlat+fetchTab[i][1]*fetchSize[1], 
+										minlon:baseBB.minlon+fetchTab[i][0]*fetchSize[0], 
+										maxlat:baseBB.maxlat+fetchTab[i][1]*fetchSize[1], 
+										maxlon:baseBB.maxlon+fetchTab[i][0]*fetchSize[0]};
+							tryGetOsmData(bbToUse);
+						}
 					}
 				});
 			  }
@@ -206,7 +218,11 @@
 							if(showSatellite == "0")
 								satNode.visible = false;
 							getSatelliteView(mapData.bounds,satNode);
-							
+							fetchedCount++;
+							if(fetchedCount == getRadioValue("mapSize")){
+								fullyLoaded = 1;
+								div.style["border-color"] = "green";
+							}
 							
 						});
 					  }
@@ -835,8 +851,8 @@
 				}
 			}
 			
-			var mouseX = 0, mouseY = 0, mouseDown = 0, forward = 0, backward = 0, leftward = 0, rightward = 0, upward = 0,downward = 0,
-
+			var mouseX = 0, mouseY = 0,diffX = 0,diffY = 0, mouseDown = 0, forward = 0, backward = 0, leftward = 0, rightward = 0, upward = 0,downward = 0,
+			lookAtPos,
 			windowHalfX = window.innerWidth / 2,
 			windowHalfY = window.innerHeight / 2,
 
@@ -905,8 +921,6 @@
 			}
 
 			function init() {
-			
-				div  = document.getElementById('map3D');
 				
 				var radio1 = document.getElementById('osmdata');
 				radio1.addEventListener("change",mapTypeChangeToOSMData);
@@ -992,26 +1006,42 @@
 
 			function onCanvasMouseMove( event ) {
 
-				mouseX = event.offsetX - windowHalfX;
-				mouseY = event.offsetY - windowHalfY;
+				if(mouseDown == true){
+					diffX = event.offsetX - mouseX;
+					diffY = event.offsetY - mouseY;
+					mouseX = event.offsetX;
+					mouseY = event.offsetY;
+				}
 
 			}
 			function onCanvasMouseLeave( event ) {
 
+				mouseDown = false;
 				mouseX = 0;
 				mouseY = 0;
+				diffX = 0;
+				diffY = 0;
 
 			}
 			
 			function onCanvasMouseDown( event ) {
 
 				mouseDown = true;
+				mouseX = event.offsetX;
+				mouseY = event.offsetY;
+				diffX = 0;
+				diffY = 0;
 
 			}
 			
 			function onCanvasMouseUp( event ) {
 
 				mouseDown = false;
+				
+				mouseX = 0;
+				mouseY = 0;
+				diffX = 0;
+				diffY = 0;
 
 			}
 			
@@ -1068,35 +1098,29 @@
 				
 				if(resetCam){
 					resetCam=false;
-					camera.position.z = 1500;
-					camera.position.y = -1500;
-					camera.position.x = 0;
-					var lookAtPos = new THREE.Vector3();
+					var size = getRadioValue("mapSize");
+					
+					if(size == 9){
+						camera.position.z = 1500;
+						camera.position.y = -1700;
+						camera.position.x = 0;
+						lookAtPos = new THREE.Vector3(0,-200,0);
+					}else if(size == 1) {
+						camera.position.z = 500;
+						camera.position.y = -550;
+						camera.position.x = 0;
+						lookAtPos = new THREE.Vector3(0,-50,0);
+					}else {
+						camera.position.z = 2500;
+						camera.position.y = -2800;
+						camera.position.x = 0;
+						lookAtPos = new THREE.Vector3(0,-300,0);
+					}
 				}else{
 				
 					var camDir = camera.getWorldDirection();
 					var right = new THREE.Vector3().crossVectors(camDir,new THREE.Vector3(0,0,1));
 
-					
-					
-					/*if(Math.abs(mouseX) > window.innerWidth / 8){
-					
-						if(mouseX < 0)
-							lookAtPos.sub(right.normalize());
-						else
-							lookAtPos.add(right.normalize());
-					}
-					
-					if(Math.abs(mouseY) > window.innerHeight / 8){
-					
-						if(mouseY > 0)
-							lookAtPos.sub(new THREE.Vector3(0,0,1));
-						else
-							lookAtPos.add(new THREE.Vector3(0,0,1));
-					
-					}*/
-				
-				
 					if(forward){
 						camera.position.add(new THREE.Vector3(camDir.x,camDir.y,0).normalize().multiplyScalar(10));
 					}else if(backward){
@@ -1116,7 +1140,21 @@
 						camera.position.z = 2;
 					}
 					
-					var lookAtPos= new THREE.Vector3().addVectors(camera.position,camDir.normalize().multiplyScalar(100));
+					lookAtPos= new THREE.Vector3().addVectors(camera.position,camDir.normalize().multiplyScalar(100));
+					
+					if(mouseDown == true){
+					
+						if(diffX > 0)
+							lookAtPos.sub(right.normalize().multiplyScalar(diffX));
+						else if(diffX <0)
+							lookAtPos.add(right.normalize().multiplyScalar(-diffX));
+						
+						lookAtPos.add(new THREE.Vector3(0,0,diffY));
+							
+						diffX = 0;
+						diffY = 0;
+					
+					}
 				
 				}
 				
